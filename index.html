@@ -551,27 +551,55 @@
       return;
     }
     window.speechSynthesis.cancel();
+    speakChunks(text, langCode, 0);
+  }
 
 
-    utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = LANG_META[langCode] ? LANG_META[langCode].bcp47 : 'en';
+  function speakChunks(text, langCode, startIdx) {
+    if (!window.speechSynthesis) return;
 
+    // Découper en segments de ~200 caractères max, coupure à la phrase
+    const maxLen = 200;
+    let endIdx = startIdx + maxLen;
+    if (endIdx >= text.length) endIdx = text.length;
+    else {
+      // Reculer jusqu'à une coupure de phrase (. ! ? suivi d'espace ou fin)
+      const slice = text.slice(startIdx, endIdx);
+      const lastPunct = Math.max(
+        slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '),
+        slice.lastIndexOf('.\n'), slice.lastIndexOf('!\n'), slice.lastIndexOf('?\n'),
+        slice.lastIndexOf('.\u201C'), slice.lastIndexOf('.\u00AB'),
+        slice.lastIndexOf('\n')
+      );
+      if (lastPunct > maxLen * 0.3) endIdx = startIdx + lastPunct + 1;
+    }
 
+    const chunk = text.slice(startIdx, endIdx).trim();
+    if (!chunk) {
+      setPlaybackState('idle');
+      return;
+    }
+
+    const u = new SpeechSynthesisUtterance(chunk);
+    u.lang = LANG_META[langCode] ? LANG_META[langCode].bcp47 : 'en';
     const chosenVoice = getSelectedVoice();
-    if (chosenVoice) utterance.voice = chosenVoice;
+    if (chosenVoice) u.voice = chosenVoice;
+    u.rate = parseFloat(rateRange.value);
+    utterance = u;
 
+    u.onstart = () => setPlaybackState('playing');
+    u.onpause = () => setPlaybackState('paused');
+    u.onresume = () => setPlaybackState('playing');
+    u.onend = () => {
+      if (endIdx < text.length) speakChunks(text, langCode, endIdx);
+      else setPlaybackState('idle');
+    };
+    u.onerror = () => {
+      if (endIdx < text.length) speakChunks(text, langCode, endIdx);
+      else setPlaybackState('idle');
+    };
 
-    utterance.rate = parseFloat(rateRange.value);
-
-
-    utterance.onstart = () => setPlaybackState('playing');
-    utterance.onpause = () => setPlaybackState('paused');
-    utterance.onresume = () => setPlaybackState('playing');
-    utterance.onend = () => setPlaybackState('idle');
-    utterance.onerror = () => setPlaybackState('idle');
-
-
-    window.speechSynthesis.speak(utterance);
+    window.speechSynthesis.speak(u);
   }
 
 
