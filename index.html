@@ -386,10 +386,11 @@
 
 
   function loadVoices() {
+    if (!window.speechSynthesis) return;
     availableVoices = window.speechSynthesis.getVoices();
   }
   loadVoices();
-  if (window.speechSynthesis.onvoiceschanged !== undefined) {
+  if (window.speechSynthesis && window.speechSynthesis.onvoiceschanged !== undefined) {
     window.speechSynthesis.onvoiceschanged = loadVoices;
   }
 
@@ -519,6 +520,7 @@
   textInput.addEventListener('input', updateCharCount);
   clearBtn.addEventListener('click', () => {
     textInput.value = '';
+    localStorage.removeItem('voxcell_text');
     updateCharCount();
     stopSpeech();
   });
@@ -544,6 +546,10 @@
 
 
   function speak(text, langCode) {
+    if (!window.speechSynthesis) {
+      alert('La synthèse vocale n\'est pas disponible sur ce navigateur.');
+      return;
+    }
     window.speechSynthesis.cancel();
 
 
@@ -581,14 +587,14 @@
     } else {
       wave.classList.add('idle');
       statusLabel.textContent = 'Silencieux';
-      playBtn.disabled = !textInput.value.trim();
+      playBtn.disabled = !textInput.value.trim() || !window.speechSynthesis;
       pauseBtn.disabled = true; stopBtn.disabled = true;
     }
   }
 
 
   function stopSpeech() {
-    window.speechSynthesis.cancel();
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
     setPlaybackState('idle');
   }
 
@@ -628,23 +634,21 @@
      8. CONTRÔLES DE LECTURE
   ============================================================ */
   playBtn.addEventListener('click', () => {
+    if (!window.speechSynthesis) return;
     if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
     } else if (!window.speechSynthesis.speaking && textInput.value.trim()) {
       runDetectionAndSpeak();
     }
   });
-  pauseBtn.addEventListener('click', () => window.speechSynthesis.pause());
+  pauseBtn.addEventListener('click', () => { if (window.speechSynthesis) window.speechSynthesis.pause(); });
   stopBtn.addEventListener('click', stopSpeech);
 
 
   rateRange.addEventListener('input', () => {
     rateValue.textContent = `${parseFloat(rateRange.value).toFixed(1)}×`;
-    // Si une lecture est en cours, on relance avec la nouvelle vitesse
-    if (window.speechSynthesis.speaking && detectedLang) {
-      const wasPlaying = true;
+    if (window.speechSynthesis && window.speechSynthesis.speaking && detectedLang) {
       speak(textInput.value.trim(), detectedLang);
-      if (!wasPlaying) window.speechSynthesis.pause();
     }
   });
 
@@ -656,13 +660,20 @@
 
 
   textInput.addEventListener('input', () => {
-    playBtn.disabled = !textInput.value.trim() || window.speechSynthesis.speaking;
+    playBtn.disabled = !textInput.value.trim() || (window.speechSynthesis && window.speechSynthesis.speaking);
   });
 
 
   // État initial
   setPlaybackState('idle');
   updateCharCount();
+  // Restaurer le texte sauvegardé
+  const saved = localStorage.getItem('voxcell_text');
+  if (saved) { textInput.value = saved; updateCharCount(); playBtn.disabled = !window.speechSynthesis; }
+  // Sauvegarder le texte à chaque saisie
+  textInput.addEventListener('input', () => {
+    localStorage.setItem('voxcell_text', textInput.value);
+  });
 })();
 </script>
 </body>
