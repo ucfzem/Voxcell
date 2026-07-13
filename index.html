@@ -530,6 +530,7 @@
      6. SYNTHÈSE VOCALE (Text-to-Speech)
   ============================================================ */
   let utterance = null;
+  let speechCanceled = false;
 
 
   function setSealLang(langCode) {
@@ -550,13 +551,15 @@
       alert('La synthèse vocale n\'est pas disponible sur ce navigateur.');
       return;
     }
+    speechCanceled = true;
     window.speechSynthesis.cancel();
+    speechCanceled = false;
     speakChunks(text, langCode, 0);
   }
 
 
   function speakChunks(text, langCode, startIdx) {
-    if (!window.speechSynthesis) return;
+    if (!window.speechSynthesis || speechCanceled) return;
 
     // Découper en segments de ~200 caractères max, coupure à la phrase
     const maxLen = 200;
@@ -591,11 +594,11 @@
     u.onpause = () => setPlaybackState('paused');
     u.onresume = () => setPlaybackState('playing');
     u.onend = () => {
-      if (endIdx < text.length) speakChunks(text, langCode, endIdx);
+      if (endIdx < text.length) setTimeout(() => speakChunks(text, langCode, endIdx), 80);
       else setPlaybackState('idle');
     };
     u.onerror = () => {
-      if (endIdx < text.length) speakChunks(text, langCode, endIdx);
+      if (endIdx < text.length) setTimeout(() => speakChunks(text, langCode, endIdx), 80);
       else setPlaybackState('idle');
     };
 
@@ -622,6 +625,7 @@
 
 
   function stopSpeech() {
+    speechCanceled = true;
     if (window.speechSynthesis) window.speechSynthesis.cancel();
     setPlaybackState('idle');
   }
