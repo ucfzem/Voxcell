@@ -554,55 +554,44 @@
     speechCanceled = true;
     window.speechSynthesis.cancel();
     speechCanceled = false;
-    speakChunks(text, langCode, 0);
+
+    const chunks = splitText(text);
+    for (let i = 0; i < chunks.length; i++) {
+      const u = new SpeechSynthesisUtterance(chunks[i]);
+      u.lang = LANG_META[langCode] ? LANG_META[langCode].bcp47 : 'en';
+      const chosenVoice = getSelectedVoice();
+      if (chosenVoice) u.voice = chosenVoice;
+      u.rate = parseFloat(rateRange.value);
+      u.onstart = () => setPlaybackState('playing');
+      u.onpause = () => setPlaybackState('paused');
+      u.onresume = () => setPlaybackState('playing');
+      u.onend = () => { if (i === chunks.length - 1) setPlaybackState('idle'); };
+      u.onerror = () => { if (i === chunks.length - 1) setPlaybackState('idle'); };
+      if (i === 0) utterance = u;
+      window.speechSynthesis.speak(u);
+    }
   }
 
 
-  function speakChunks(text, langCode, startIdx) {
-    if (!window.speechSynthesis || speechCanceled) return;
-
-    // Découper en segments de ~200 caractères max, coupure à la phrase
+  function splitText(text) {
     const maxLen = 200;
-    let endIdx = startIdx + maxLen;
-    if (endIdx >= text.length) endIdx = text.length;
-    else {
-      // Reculer jusqu'à une coupure de phrase (. ! ? suivi d'espace ou fin)
-      const slice = text.slice(startIdx, endIdx);
-      const lastPunct = Math.max(
+    const parts = [];
+    let start = 0;
+    while (start < text.length) {
+      let end = start + maxLen;
+      if (end >= text.length) { parts.push(text.slice(start).trim()); break; }
+      const slice = text.slice(start, end);
+      const p = Math.max(
         slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '),
         slice.lastIndexOf('.\n'), slice.lastIndexOf('!\n'), slice.lastIndexOf('?\n'),
         slice.lastIndexOf('.\u201C'), slice.lastIndexOf('.\u00AB'),
         slice.lastIndexOf('\n')
       );
-      if (lastPunct > maxLen * 0.3) endIdx = startIdx + lastPunct + 1;
+      if (p > maxLen * 0.3) end = start + p + 1;
+      parts.push(text.slice(start, end).trim());
+      start = end;
     }
-
-    const chunk = text.slice(startIdx, endIdx).trim();
-    if (!chunk) {
-      setPlaybackState('idle');
-      return;
-    }
-
-    const u = new SpeechSynthesisUtterance(chunk);
-    u.lang = LANG_META[langCode] ? LANG_META[langCode].bcp47 : 'en';
-    const chosenVoice = getSelectedVoice();
-    if (chosenVoice) u.voice = chosenVoice;
-    u.rate = parseFloat(rateRange.value);
-    utterance = u;
-
-    u.onstart = () => setPlaybackState('playing');
-    u.onpause = () => setPlaybackState('paused');
-    u.onresume = () => setPlaybackState('playing');
-    u.onend = () => {
-      if (endIdx < text.length) setTimeout(() => speakChunks(text, langCode, endIdx), 80);
-      else setPlaybackState('idle');
-    };
-    u.onerror = () => {
-      if (endIdx < text.length) setTimeout(() => speakChunks(text, langCode, endIdx), 80);
-      else setPlaybackState('idle');
-    };
-
-    window.speechSynthesis.speak(u);
+    return parts.filter(Boolean);
   }
 
 
@@ -679,9 +668,6 @@
 
   rateRange.addEventListener('input', () => {
     rateValue.textContent = `${parseFloat(rateRange.value).toFixed(1)}×`;
-    if (window.speechSynthesis && window.speechSynthesis.speaking && detectedLang) {
-      speak(textInput.value.trim(), detectedLang);
-    }
   });
 
 
