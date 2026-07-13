@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voxcell — Lecteur vocal intelligent</title>
+
+
+<!-- Tailwind CSS via CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+
+<!-- mammoth.js pour lire les fichiers .docx -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+
+
+<!-- pdf.js pour lire les fichiers .pdf -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+
+<!-- Polices : Cinzel (titres) + DM Sans (texte) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+
+
+<style>
+  :root{
+    --ink:#0b0906;
+    --card:#15110b;
+    --card-2:#1c160d;
+    --border:#2a2113;
+    --gold:#c9a84c;
+    --gold-bright:#f0c866;
+    --text:#ece4d3;
+    --text-dim:#a99d84;
+  }
+  *{ scrollbar-color: var(--gold) var(--card); }
+  body{
+    background-color: var(--ink);
+    background-image:
+      radial-gradient(circle at 15% 0%, rgba(201,168,76,0.08), transparent 40%),
+      radial-gradient(circle at 85% 100%, rgba(201,168,76,0.06), transparent 45%);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+  }
+  .font-display{ font-family: 'Cinzel', serif; }
+  .card{
+    background: linear-gradient(180deg, var(--card-2), var(--card));
+    border: 1px solid var(--border);
+  }
+  .gold-text{ color: var(--gold-bright); }
+  .gold-line{ background: linear-gradient(90deg, transparent, var(--gold), transparent); height:1px; }
+
+
+  textarea{
+    background: rgba(0,0,0,0.25);
+    border: 1px solid var(--border);
+  }
+  textarea:focus{
+    outline: none;
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(201,168,76,0.15);
+  }
+
+
+  .btn-gold{
+    background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+    color:#1a1408;
+    font-weight:700;
+  }
+  .btn-gold:hover{ filter: brightness(1.08); }
+  .btn-gold:disabled{ opacity:.4; filter:none; cursor:not-allowed; }
+
+
+  .btn-ghost{
+    background: transparent;
+    border:1px solid var(--border);
+    color: var(--text);
+  }
+  .btn-ghost:hover{ border-color: var(--gold); color: var(--gold-bright); }
+  .btn-ghost:disabled{ opacity:.35; cursor:not-allowed; }
+
+
+  /* Zone de dépôt de fichier */
+  .dropzone{
+    border: 1.5px dashed var(--border);
+    transition: border-color .2s, background-color .2s;
+  }
+  .dropzone.drag-over{
+    border-color: var(--gold);
+    background: rgba(201,168,76,0.06);
+  }
+
+
+  /* Sceau de langue détectée : élément signature de la page */
+  .seal{
+    width: 76px; height: 76px;
+    border-radius: 999px;
+    border: 2px solid var(--gold);
+    background: radial-gradient(circle at 35% 30%, rgba(240,200,102,0.18), rgba(0,0,0,0.2));
+    display:flex; align-items:center; justify-content:center;
+    position: relative;
+    box-shadow: 0 0 0 3px rgba(201,168,76,0.12), 0 0 18px rgba(201,168,76,0.15);
+  }
+  .seal::before{
+    content:"";
+    position:absolute; inset:-8px;
+    border-radius: 999px;
+    border: 1px dashed rgba(201,168,76,0.35);
+  }
+  .seal.stamped{
+    animation: stamp .35s cubic-bezier(.2,1.6,.4,1);
+  }
+  @keyframes stamp{
+    0%{ transform: scale(1.6) rotate(-8deg); opacity:0; }
+    60%{ transform: scale(0.95) rotate(2deg); opacity:1; }
+    100%{ transform: scale(1) rotate(0deg); }
+  }
+
+
+  /* Barres d'onde vocale, actives pendant la lecture */
+  .wave{ display:flex; align-items:flex-end; gap:3px; height:22px; }
+  .wave span{
+    width:3px; background: var(--gold);
+    border-radius: 2px;
+    animation: bounce 1s ease-in-out infinite;
+    opacity:.85;
+  }
+  .wave span:nth-child(1){ animation-delay: -0.9s; }
+  .wave span:nth-child(2){ animation-delay: -0.7s; }
+  .wave span:nth-child(3){ animation-delay: -0.5s; }
+  .wave span:nth-child(4){ animation-delay: -0.3s; }
+  .wave span:nth-child(5){ animation-delay: -0.1s; }
+  @keyframes bounce{
+    0%,100%{ height: 4px; }
+    50%{ height: 22px; }
+  }
+  .wave.paused span, .wave.idle span{ animation-play-state: paused; height:4px; }
+
+
+  input[type="range"]{ accent-color: var(--gold); }
+
+
+  ::-webkit-scrollbar{ width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb{ background: var(--border); border-radius: 4px; }
+
+
+  /* Respect des préférences de mouvement réduit */
+  @media (prefers-reduced-motion: reduce){
+    .wave span, .seal.stamped{ animation: none !important; }
+  }
+
+
+  [dir="rtl"] textarea{ text-align:right; }
+</style>
+</head>
+<body class="min-h-screen">
+
+
+<div class="max-w-5xl mx-auto px-5 py-10 md:py-14">
+
+
+  <!-- En-tête -->
+  <header class="mb-10 text-center">
+    <p class="uppercase tracking-[0.3em] text-xs gold-text mb-3">Lecture à haute voix</p>
+    <h1 class="font-display text-4xl md:text-5xl gold-text mb-3">Voxcell</h1>
+    <div class="gold-line max-w-xs mx-auto mb-3"></div>
+    <p class="text-text-dim text-sm md:text-base" style="color:var(--text-dim)">
+      Écrivez, collez ou déposez un texte — Voxcell détecte la langue et le lit à voix haute.
+    </p>
+  </header>
+
+
+  <main class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+
+    <!-- Colonne gauche : saisie de texte -->
+    <section class="lg:col-span-3 card rounded-2xl p-5 md:p-6">
+      <label for="textInput" class="block text-sm mb-2" style="color:var(--text-dim)">Votre texte</label>
+      <textarea id="textInput" rows="10"
+        class="w-full rounded-xl p-4 text-[15px] leading-relaxed resize-y"
+        placeholder="Écrivez ou collez votre texte ici, dans n'importe quelle langue…"></textarea>
+
+
+      <div class="flex items-center justify-between mt-2 mb-5">
+        <span id="charCount" class="text-xs" style="color:var(--text-dim)">0 caractère</span>
+        <button id="clearBtn" class="text-xs underline" style="color:var(--text-dim)">Effacer</button>
+      </div>
+
+
+      <!-- Zone de dépôt de fichier -->
+      <div id="dropzone" class="dropzone rounded-xl p-6 text-center cursor-pointer">
+        <p class="text-sm mb-1">Glissez-déposez un fichier ici</p>
+        <p class="text-xs mb-3" style="color:var(--text-dim)">.txt · .docx · .pdf</p>
+        <button id="browseBtn" type="button" class="btn-ghost rounded-lg px-4 py-2 text-sm">Parcourir les fichiers</button>
+        <input id="fileInput" type="file" accept=".txt,.docx,.pdf" class="hidden">
+        <p id="fileStatus" class="text-xs mt-3 gold-text hidden"></p>
+      </div>
+
+
+      <button id="detectBtn" class="btn-gold w-full rounded-xl py-3.5 mt-6 text-[15px] tracking-wide">
+        Détecter et Lire
+      </button>
+    </section>
+
+
+    <!-- Colonne droite : panneau de contrôle -->
+    <section class="lg:col-span-2 card rounded-2xl p-5 md:p-6 flex flex-col gap-6">
+
+
+      <!-- Langue détectée -->
+      <div class="flex items-center gap-4">
+        <div id="seal" class="seal">
+          <span id="sealFlag" class="text-2xl">🌐</span>
+        </div>
+        <div>
+          <p class="text-xs" style="color:var(--text-dim)">Langue détectée</p>
+          <p id="langLabel" class="font-display text-lg gold-text">En attente…</p>
+          <p id="voiceLabel" class="text-xs mt-0.5" style="color:var(--text-dim)"></p>
+        </div>
+      </div>
+
+
+      <div class="gold-line"></div>
+
+
+      <!-- Options de lecture -->
+      <div>
+        <label class="flex items-center justify-between text-sm mb-2">
+          <span style="color:var(--text-dim)">Vitesse de lecture</span>
+          <span id="rateValue" class="gold-text">1.0×</span>
+        </label>
+        <input id="rateRange" type="range" min="0.5" max="2" step="0.1" value="1" class="w-full">
+      </div>
+
+
+      <div>
+        <label class="block text-sm mb-2" style="color:var(--text-dim)">Voix</label>
+        <select id="voiceSelect" class="w-full rounded-lg p-2.5 text-sm" style="background:rgba(0,0,0,0.25); border:1px solid var(--border); color:var(--text)">
+          <option>Détection en cours…</option>
+        </select>
+      </div>
+
+
+      <div class="gold-line"></div>
+
+
+      <!-- Indicateur d'onde vocale -->
+      <div class="flex items-center justify-center gap-3">
+        <div id="wave" class="wave idle">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <span id="statusLabel" class="text-xs" style="color:var(--text-dim)">Silencieux</span>
+      </div>
+
+
+      <!-- Contrôles audio -->
+      <div class="grid grid-cols-3 gap-3 mt-auto">
+        <button id="playBtn" class="btn-ghost rounded-xl py-2.5 text-sm" disabled>▶ Lecture</button>
+        <button id="pauseBtn" class="btn-ghost rounded-xl py-2.5 text-sm" disabled>⏸ Pause</button>
+        <button id="stopBtn" class="btn-ghost rounded-xl py-2.5 text-sm" disabled>⏹ Stop</button>
+      </div>
+    </section>
+  </main>
+
+
+  <footer class="text-center mt-10 text-xs" style="color:var(--text-dim)">
+    100% local — aucune donnée n'est envoyée à un serveur. Fonctionne avec les voix installées sur votre appareil.
+  </footer>
+</div>
+
+
+<script>
+(() => {
+  "use strict";
+
+
+  /* ============================================================
+     1. RÉFÉRENCES DOM
+  ============================================================ */
+  const textInput   = document.getElementById('textInput');
+  const charCount    = document.getElementById('charCount');
+  const clearBtn      = document.getElementById('clearBtn');
+
+
+  const dropzone     = document.getElementById('dropzone');
+  const browseBtn    = document.getElementById('browseBtn');
+  const fileInput    = document.getElementById('fileInput');
+  const fileStatus    = document.getElementById('fileStatus');
+
+
+  const detectBtn    = document.getElementById('detectBtn');
+
+
+  const seal         = document.getElementById('seal');
+  const sealFlag      = document.getElementById('sealFlag');
+  const langLabel     = document.getElementById('langLabel');
+  const voiceLabel    = document.getElementById('voiceLabel');
+
+
+  const rateRange     = document.getElementById('rateRange');
+  const rateValue     = document.getElementById('rateValue');
+  const voiceSelect   = document.getElementById('voiceSelect');
+
+
+  const wave          = document.getElementById('wave');
+  const statusLabel   = document.getElementById('statusLabel');
+
+
+  const playBtn       = document.getElementById('playBtn');
+  const pauseBtn       = document.getElementById('pauseBtn');
+  const stopBtn        = document.getElementById('stopBtn');
+
+
+  /* ============================================================
+     2. DÉTECTION DE LANGUE (heuristique locale, sans API externe)
+     Principe : on compte les occurrences de mots-outils très
+     fréquents (articles, pronoms, conjonctions) propres à chaque
+     langue. La langue dont le score normalisé est le plus élevé
+     est retenue. L'arabe est détecté séparément via son plage
+     Unicode, ce qui est fiable à 100% sans dictionnaire.
+  ============================================================ */
+  const STOPWORDS = {
+    fr: ['le','la','les','de','des','un','une','et','est','que','qui','pour','dans','ce','pas','vous','nous','il','elle','avec','sur','au','aux','du','se','ne','en'],
+    en: ['the','is','are','and','of','to','in','it','that','for','you','with','on','as','was','this','but','have','be','at','not','they'],
+    es: ['el','la','los','las','de','que','es','un','una','en','por','para','con','no','se','su','del','al','como','pero','más'],
+    de: ['der','die','das','und','ist','ein','eine','zu','den','mit','nicht','sich','auf','für','von','im','dass','ich','sie','es'],
+    it: ['il','lo','la','le','di','che','è','un','una','in','per','con','non','si','del','al','come','ma','più','sono']
+  };
+
+
+  const LANG_META = {
+    fr: { name:'Français',  flag:'🇫🇷', bcp47:'fr' },
+    en: { name:'English',   flag:'🇬🇧', bcp47:'en' },
+    es: { name:'Español',   flag:'🇪🇸', bcp47:'es' },
+    de: { name:'Deutsch',   flag:'🇩🇪', bcp47:'de' },
+    it: { name:'Italiano',  flag:'🇮🇹', bcp47:'it' },
+    ar: { name:'العربية',   flag:'🇲🇦', bcp47:'ar' }
+  };
+
+
+  function detectLanguage(text) {
+    const clean = text.trim();
+    if (!clean) return null;
+
+
+    // Détection de l'arabe via la plage Unicode dédiée
+    const arabicChars = (clean.match(/[\u0600-\u06FF]/g) || []).length;
+    if (arabicChars / clean.length > 0.15) return 'ar';
+
+
+    // Tokenisation simple pour les langues latines
+    const words = clean.toLowerCase()
+      .replace(/[^\p{L}\s']/gu, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+
+
+    if (words.length === 0) return null;
+
+
+    const scores = {};
+    for (const lang in STOPWORDS) {
+      const set = new Set(STOPWORDS[lang]);
+      let hits = 0;
+      for (const w of words) if (set.has(w)) hits++;
+      scores[lang] = hits / words.length;
+    }
+
+
+    // On choisit la langue avec le meilleur score
+    let best = 'en', bestScore = -1;
+    for (const lang in scores) {
+      if (scores[lang] > bestScore) { bestScore = scores[lang]; best = lang; }
+    }
+    // Si aucun mot-outil connu n'est trouvé, on retombe sur l'anglais par défaut
+    return bestScore > 0 ? best : 'en';
+  }
+
+
+  /* ============================================================
+     3. GESTION DES VOIX DISPONIBLES (Web Speech API)
+  ============================================================ */
+  let availableVoices = [];
+  let detectedLang = null;
+
+
+  function loadVoices() {
+    availableVoices = window.speechSynthesis.getVoices();
+  }
+  loadVoices();
+  if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+  }
+
+
+  function populateVoiceSelect(langCode) {
+    const matching = availableVoices.filter(v => v.lang.toLowerCase().startsWith(langCode));
+    const list = matching.length ? matching : availableVoices;
+
+
+    voiceSelect.innerHTML = '';
+    if (list.length === 0) {
+      voiceSelect.innerHTML = '<option>Aucune voix système trouvée</option>';
+      return;
+    }
+    list.forEach((v, i) => {
+      const opt = document.createElement('option');
+      opt.value = v.voiceURI;
+      opt.textContent = `${v.name} (${v.lang})`;
+      voiceSelect.appendChild(opt);
+    });
+  }
+
+
+  function getSelectedVoice() {
+    const uri = voiceSelect.value;
+    return availableVoices.find(v => v.voiceURI === uri) || null;
+  }
+
+
+  /* ============================================================
+     4. LECTURE DE FICHIERS (.txt, .docx, .pdf)
+  ============================================================ */
+  if (window['pdfjsLib']) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+
+  async function readTxt(file) {
+    return await file.text();
+  }
+
+
+  async function readDocx(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value;
+  }
+
+
+  async function readPdf(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      fullText += content.items.map(item => item.str).join(' ') + '\n\n';
+    }
+    return fullText;
+  }
+
+
+  async function handleFile(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    fileStatus.classList.remove('hidden');
+    fileStatus.textContent = `Lecture de « ${file.name} »…`;
+
+
+    try {
+      let text = '';
+      if (ext === 'txt') text = await readTxt(file);
+      else if (ext === 'docx') text = await readDocx(file);
+      else if (ext === 'pdf') text = await readPdf(file);
+      else {
+        fileStatus.textContent = 'Format non pris en charge. Utilisez .txt, .docx ou .pdf.';
+        return;
+      }
+
+
+      textInput.value = text.trim();
+      updateCharCount();
+      fileStatus.textContent = `« ${file.name} » chargé avec succès.`;
+      // Lance automatiquement la détection + lecture une fois le fichier importé
+      runDetectionAndSpeak();
+    } catch (err) {
+      console.error(err);
+      fileStatus.textContent = "Erreur lors de la lecture du fichier.";
+    }
+  }
+
+
+  browseBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files[0]) handleFile(e.target.files[0]);
+  });
+
+
+  ['dragenter','dragover'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('drag-over');
+    })
+  );
+  ['dragleave','drop'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+    })
+  );
+  dropzone.addEventListener('drop', (e) => {
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+  dropzone.addEventListener('click', (e) => {
+    if (e.target !== browseBtn) fileInput.click();
+  });
+
+
+  /* ============================================================
+     5. COMPTEUR DE CARACTÈRES + BOUTON EFFACER
+  ============================================================ */
+  function updateCharCount() {
+    const n = textInput.value.length;
+    charCount.textContent = `${n} caractère${n > 1 ? 's' : ''}`;
+  }
+  textInput.addEventListener('input', updateCharCount);
+  clearBtn.addEventListener('click', () => {
+    textInput.value = '';
+    updateCharCount();
+    stopSpeech();
+  });
+
+
+  /* ============================================================
+     6. SYNTHÈSE VOCALE (Text-to-Speech)
+  ============================================================ */
+  let utterance = null;
+
+
+  function setSealLang(langCode) {
+    const meta = LANG_META[langCode] || { name:'Inconnue', flag:'🌐' };
+    sealFlag.textContent = meta.flag;
+    langLabel.textContent = `Langue détectée : ${meta.name}`;
+    seal.classList.remove('stamped');
+    void seal.offsetWidth; // force le reflow pour rejouer l'animation du sceau
+    seal.classList.add('stamped');
+
+
+    document.documentElement.setAttribute('dir', langCode === 'ar' ? 'rtl' : 'ltr');
+  }
+
+
+  function speak(text, langCode) {
+    window.speechSynthesis.cancel();
+
+
+    utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = LANG_META[langCode] ? LANG_META[langCode].bcp47 : 'en';
+
+
+    const chosenVoice = getSelectedVoice();
+    if (chosenVoice) utterance.voice = chosenVoice;
+
+
+    utterance.rate = parseFloat(rateRange.value);
+
+
+    utterance.onstart = () => setPlaybackState('playing');
+    utterance.onpause = () => setPlaybackState('paused');
+    utterance.onresume = () => setPlaybackState('playing');
+    utterance.onend = () => setPlaybackState('idle');
+    utterance.onerror = () => setPlaybackState('idle');
+
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+
+  function setPlaybackState(state) {
+    wave.classList.remove('idle','paused');
+    if (state === 'playing') {
+      statusLabel.textContent = 'Lecture en cours…';
+      playBtn.disabled = true; pauseBtn.disabled = false; stopBtn.disabled = false;
+    } else if (state === 'paused') {
+      wave.classList.add('paused');
+      statusLabel.textContent = 'En pause';
+      playBtn.disabled = false; pauseBtn.disabled = true; stopBtn.disabled = false;
+    } else {
+      wave.classList.add('idle');
+      statusLabel.textContent = 'Silencieux';
+      playBtn.disabled = !textInput.value.trim();
+      pauseBtn.disabled = true; stopBtn.disabled = true;
+    }
+  }
+
+
+  function stopSpeech() {
+    window.speechSynthesis.cancel();
+    setPlaybackState('idle');
+  }
+
+
+  /* ============================================================
+     7. ORCHESTRATION : DÉTECTER + LIRE
+  ============================================================ */
+  function runDetectionAndSpeak() {
+    const text = textInput.value.trim();
+    if (!text) {
+      langLabel.textContent = 'Aucun texte à analyser';
+      return;
+    }
+
+
+    const lang = detectLanguage(text);
+    detectedLang = lang;
+
+
+    setSealLang(lang);
+    populateVoiceSelect(LANG_META[lang] ? LANG_META[lang].bcp47 : 'en');
+
+
+    const voiceName = getSelectedVoice() ? getSelectedVoice().name : 'voix par défaut du système';
+    voiceLabel.textContent = `Voix : ${voiceName}`;
+
+
+    playBtn.disabled = false;
+    speak(text, lang);
+  }
+
+
+  detectBtn.addEventListener('click', runDetectionAndSpeak);
+
+
+  /* ============================================================
+     8. CONTRÔLES DE LECTURE
+  ============================================================ */
+  playBtn.addEventListener('click', () => {
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    } else if (!window.speechSynthesis.speaking && textInput.value.trim()) {
+      runDetectionAndSpeak();
+    }
+  });
+  pauseBtn.addEventListener('click', () => window.speechSynthesis.pause());
+  stopBtn.addEventListener('click', stopSpeech);
+
+
+  rateRange.addEventListener('input', () => {
+    rateValue.textContent = `${parseFloat(rateRange.value).toFixed(1)}×`;
+    // Si une lecture est en cours, on relance avec la nouvelle vitesse
+    if (window.speechSynthesis.speaking && detectedLang) {
+      const wasPlaying = true;
+      speak(textInput.value.trim(), detectedLang);
+      if (!wasPlaying) window.speechSynthesis.pause();
+    }
+  });
+
+
+  voiceSelect.addEventListener('change', () => {
+    const chosenVoice = getSelectedVoice();
+    voiceLabel.textContent = `Voix : ${chosenVoice ? chosenVoice.name : 'voix par défaut'}`;
+  });
+
+
+  textInput.addEventListener('input', () => {
+    playBtn.disabled = !textInput.value.trim() || window.speechSynthesis.speaking;
+  });
+
+
+  // État initial
+  setPlaybackState('idle');
+  updateCharCount();
+})();
+</script>
+</body>
+</html>
